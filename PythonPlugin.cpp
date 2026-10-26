@@ -64,6 +64,8 @@ def is_module_available(name):
 
 	const std::wstring PythonVersionPostfix = std::to_wstring(PY_MAJOR_VERSION) + std::to_wstring(PY_MINOR_VERSION);
 
+	const double ScriptThreadsJoinTimeoutInSeconds = 5.0;
+
 	// Runtime is next to Python DLL: in Debug or Release folder of plugin, or next to executable in games.
 	std::wstring GetPythonRuntimeDirectory()
 	{
@@ -199,7 +201,11 @@ void PythonPlugin::OnUnload()
 		MainThreadState = nullptr;
 
 		// Main thread will not run queued calls anymore, so threads that wait for them get CancelledError instead of waiting forever,
-		// that includes threads that shutdown callbacks wait for.
+		// that includes threads that shutdown callbacks wait for. Calls made after this are cancelled right away.
+		{
+			std::lock_guard<std::mutex> Lock(QueueMutex);
+			bShuttingDown = true;
+		}
 		CancelQueuedCalls();
 
 		CallCallbacks(CallbackType::Shutdown, py::object());
@@ -207,19 +213,36 @@ void PythonPlugin::OnUnload()
 		for (size_t i = 0; i < static_cast<size_t>(CallbackType::Count); i++)
 			CallbackCount[i] = 0;
 
-		// Shutdown callbacks could release GIL, for example while joining a thread, so other threads could queue calls meanwhile.
-		CancelQueuedCalls();
-
 		Runner = py::object();
 		FlushPendingLogLines();
 
-		// Waits for threads of scripts that are not daemon threads.
-		if (Py_FinalizeEx() < 0)
-			LOG.Add("PythonPlugin::OnUnload: Python reported an error while finalizing", "PYTHON_PLUGIN", FE_LOG_WARNING);
+		// Py_FinalizeEx waits for threads that are not daemon threads without time limit, so one stuck thread would hang application on exit.
+		const std::vector<std::string> RunningThreadNames = JoinScriptThreads(ScriptThreadsJoinTimeoutInSeconds);
+		if (RunningThreadNames.empty())
+		{
+			if (Py_FinalizeEx() < 0)
+				LOG.Add("PythonPlugin::OnUnload: Python reported an error while finalizing", "PYTHON_PLUGIN", FE_LOG_WARNING);
+		}
+		else
+		{
+			std::string ThreadNames;
+			for (size_t i = 0; i < RunningThreadNames.size(); i++)
+				ThreadNames += (i == 0 ? "\"" : ", \"") + RunningThreadNames[i] + "\"";
+
+			LOG.Add("PythonPlugin::OnUnload: Python is not finalized, because threads " + ThreadNames + " are still running", "PYTHON_PLUGIN", FE_LOG_WARNING);
+
+			// These threads still run code of Python and of bindings, so plugin module and Python should stay loaded.
+			HMODULE PluginModule = nullptr;
+			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&PythonPlugin::Instance), &PluginModule);
+		}
 
 		FlushPendingLogLines();
 		bInitialized = false;
 		Instance = nullptr;
+
+		// Bindings now report that plugin is not loaded, threads that are still running could finish with that.
+		if (!RunningThreadNames.empty())
+			PyEval_SaveThread();
 	}
 
 	EditorAPI = nullptr;
@@ -399,6 +422,10 @@ FEEditorAPI* PythonPlugin::GetEditorAPI() const
 
 int PythonPlugin::AddCallback(CallbackType Type, py::object Function)
 {
+	// Callback added while plugin is unloading would never be called and would outlive Python.
+	if (bShuttingDown)
+		throw std::runtime_error("Python is shutting down, callbacks could not be added");
+
 	Callback NewCallback;
 	NewCallback.ID = NextCallbackID++;
 	NewCallback.Type = Type;
@@ -474,9 +501,18 @@ py::object PythonPlugin::CallOnMainThread(py::object Function)
 		return Call.Future;
 	}
 
-	std::lock_guard<std::mutex> Lock(QueueMutex);
-	Queue.push_back(Call);
-	bQueueHasCalls = true;
+	{
+		std::lock_guard<std::mutex> Lock(QueueMutex);
+		if (!bShuttingDown)
+		{
+			Queue.push_back(Call);
+			bQueueHasCalls = true;
+			return Call.Future;
+		}
+	}
+
+	// Main thread does not run queued calls while plugin is unloading, so waiting thread gets CancelledError right away.
+	Call.Future.attr("cancel")();
 	return Call.Future;
 }
 
@@ -532,6 +568,47 @@ void PythonPlugin::CancelQueuedCalls()
 		}
 		catch (py::error_already_set&) {}
 	}
+}
+
+std::vector<std::string> PythonPlugin::JoinScriptThreads(double TimeoutInSeconds)
+{
+	std::vector<std::string> RunningThreadNames;
+	try
+	{
+		py::module_ Threading = py::module_::import("threading");
+		py::module_ Time = py::module_::import("time");
+		py::object CurrentThread = Threading.attr("current_thread")();
+		const double Deadline = Time.attr("monotonic")().cast<double>() + TimeoutInSeconds;
+
+		// Threads could start other threads while they are joined, so list is taken again after each join.
+		while (true)
+		{
+			std::vector<py::object> RunningThreads;
+			py::list Threads = Threading.attr("enumerate")();
+			for (py::handle Thread : Threads)
+			{
+				if (!Thread.is(CurrentThread) && !Thread.attr("daemon").cast<bool>() && Thread.attr("is_alive")().cast<bool>())
+					RunningThreads.push_back(py::reinterpret_borrow<py::object>(Thread));
+			}
+
+			const double RemainingTime = Deadline - Time.attr("monotonic")().cast<double>();
+			if (RunningThreads.empty() || RemainingTime <= 0.0)
+			{
+				for (size_t i = 0; i < RunningThreads.size(); i++)
+					RunningThreadNames.push_back(RunningThreads[i].attr("name").cast<std::string>());
+
+				break;
+			}
+
+			RunningThreads[0].attr("join")(RemainingTime);
+		}
+	}
+	catch (py::error_already_set& Error)
+	{
+		LOG.Add("PythonPlugin::JoinScriptThreads: " + FormatException(Error), "PYTHON_PLUGIN", FE_LOG_ERROR);
+	}
+
+	return RunningThreadNames;
 }
 
 void PythonPlugin::WriteOutput(const std::string& Text, bool bErrorStream)

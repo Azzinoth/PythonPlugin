@@ -82,6 +82,8 @@ private:
 	std::mutex QueueMutex;
 	std::vector<QueuedCall> Queue;
 	std::atomic<bool> bQueueHasCalls = false;
+	// Set when plugin starts unloading, after that calls are not queued and callbacks are not added.
+	std::atomic<bool> bShuttingDown = false;
 
 	// Output of RunString, RunFile and Evaluate goes to result, other output goes to log.
 	std::string* CapturedOutput = nullptr;
@@ -94,6 +96,8 @@ private:
 	void RunQueuedCall(QueuedCall& Call);
 	void RunQueuedCalls();
 	void CancelQueuedCalls();
+	// Returns names of threads that are still running after timeout.
+	std::vector<std::string> JoinScriptThreads(double TimeoutInSeconds);
 	void FlushPendingLogLines();
 	static std::string FormatException(py::error_already_set& Error);
 };

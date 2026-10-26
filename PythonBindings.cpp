@@ -127,6 +127,26 @@ namespace
 		INSTANCED_RENDERING_SYSTEM.PopulateInstance(EngineEntity, SpawnInfo);
 	}
 
+	std::vector<std::string> GetFlagNames(const FEScene* Scene)
+	{
+		const std::pair<FESceneFlag, const char*> Flags[] = {
+			{ FESceneFlag::Renderable, "Renderable" },
+			{ FESceneFlag::Active, "Active" },
+			{ FESceneFlag::EditorMode, "EditorMode" },
+			{ FESceneFlag::GameMode, "GameMode" },
+			{ FESceneFlag::PrefabDescription, "PrefabDescription" }
+		};
+
+		std::vector<std::string> Result;
+		for (size_t i = 0; i < std::size(Flags); i++)
+		{
+			if (Scene->HasFlag(Flags[i].first))
+				Result.push_back(Flags[i].second);
+		}
+
+		return Result;
+	}
+
 	FE_COORDINATE_SPACE_TYPE ToSpace(bool bWorld)
 	{
 		return bWorld ? FE_WORLD_SPACE : FE_LOCAL_SPACE;
@@ -182,7 +202,7 @@ PYBIND11_MODULE(focalengine, Module)
 	Module.def("add_scene_deleting_callback", [](py::function Function) { return GetPlugin().AddCallback(PythonPlugin::CallbackType::SceneDeleting, Function); }, py::arg("function"),
 		"Function(scene) is called before scene is deleted.");
 	Module.def("add_shutdown_callback", [](py::function Function) { return GetPlugin().AddCallback(PythonPlugin::CallbackType::Shutdown, Function); }, py::arg("function"),
-		"Function() is called before Python is finalized, threads that are not daemon threads should be stopped here.");
+		"Function() is called before Python is finalized, threads that are not daemon threads should be stopped here. Python waits for them at most 5 seconds, if they are still running it is not finalized.");
 	Module.def("remove_callback", [](int CallbackID) { return GetPlugin().RemoveCallback(CallbackID); }, py::arg("callback_id"));
 
 	Module.def("get_graphics_mode", []() { return GraphicsModeToString(APPLICATION.GetGraphicsMode()); }, "\"OnScreen\", \"Offscreen\" or \"None\".");
@@ -211,6 +231,10 @@ PYBIND11_MODULE(focalengine, Module)
 		.def("is_valid", [](const PythonScene& Scene) { return SCENE_MANAGER.GetSceneByID(Scene.ID) != nullptr; }, MainThreadOnly())
 		.def("get_name", [](const PythonScene& Scene) { return Scene.Get()->GetName(); }, MainThreadOnly())
 		.def("set_name", [](const PythonScene& Scene, const std::string& Name) { Scene.Get()->SetName(Name); }, py::arg("name"), MainThreadOnly())
+		.def("get_tag", [](const PythonScene& Scene) { return Scene.Get()->GetTag(); }, MainThreadOnly(),
+			"Engine and editor mark their private objects with tags, for example \"ENGINE_PRIVATE_RESOURCE\" or \"EDITOR_PRIVATE_RESOURCE\".")
+		.def("get_flags", [](const PythonScene& Scene) { return GetFlagNames(Scene.Get()); }, MainThreadOnly(),
+			"List of \"Renderable\", \"Active\", \"EditorMode\", \"GameMode\" and \"PrefabDescription\". Editor game mode runs on a copy of scene with \"GameMode\" flag.")
 		.def("get_entity", [](const PythonScene& Scene, const std::string& EntityID) { return ToPythonOrNone(Scene.Get()->GetEntity(UNIQUE_ID.FromString(EntityID))); }, py::arg("id"), MainThreadOnly())
 		.def("get_entities", [](const PythonScene& Scene) {
 			FEScene* EngineScene = Scene.Get();
@@ -259,6 +283,8 @@ PYBIND11_MODULE(focalengine, Module)
 		}, MainThreadOnly())
 		.def("get_name", [](const PythonEntity& Entity) { return Entity.Get()->GetName(); }, MainThreadOnly())
 		.def("set_name", [](const PythonEntity& Entity, const std::string& Name) { Entity.Get()->SetName(Name); }, py::arg("name"), MainThreadOnly())
+		.def("get_tag", [](const PythonEntity& Entity) { return Entity.Get()->GetTag(); }, MainThreadOnly(),
+			"Engine and editor mark their private objects with tags, for example \"ENGINE_PRIVATE_RESOURCE\" or \"EDITOR_PRIVATE_RESOURCE\".")
 
 		.def("get_position", [](const PythonEntity& Entity, bool bWorld) { return GetTransform(Entity).GetPosition(ToSpace(bWorld)); }, py::arg("world") = false, MainThreadOnly())
 		.def("set_position", [](const PythonEntity& Entity, const glm::vec3& Position, bool bWorld) { GetTransform(Entity).SetPosition(Position, ToSpace(bWorld)); }, py::arg("position"), py::arg("world") = false, MainThreadOnly())
