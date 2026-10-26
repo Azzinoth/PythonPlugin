@@ -1,0 +1,43 @@
+{
+	"Dependencies" : [],
+	"Description" : "Embeds a Python interpreter that runs scripts and code strings, and gives Python access to scenes and entities through the focalengine module.",
+	"ID" : "a1262d03-a32d-4dbe-aa78-faf2e862ce72",
+	"Modules" : 
+	[
+		{
+			"Dependencies" : [],
+			"EntryPointFileName" : "PythonPlugin.dll",
+			"ID" : "75f947e1-b47e-464c-834e-8305a4d7e886",
+			"Name" : "PythonPlugin",
+			"SupportedGraphicsModes" : 
+			[
+				"OnScreen"
+			],
+			"SupportedOS" : 
+			[
+				"Windows"
+			],
+			"Type" : "Engine"
+		},
+		{
+			"Dependencies" : 
+			[
+				"75f947e1-b47e-464c-834e-8305a4d7e886"
+			],
+			"EntryPointFileName" : "PythonPluginEditor.dll",
+			"ID" : "5aed25b8-56a7-4389-a5fc-dbef8c355a06",
+			"Name" : "PythonPluginEditor",
+			"SupportedOS" : 
+			[
+				"Windows"
+			],
+			"Type" : "Editor"
+		}
+	],
+	"Name" : "PythonPlugin",
+	"SupportedOS" : 
+	[
+		"Windows"
+	],
+	"Version" : "1.0.0"
+}
