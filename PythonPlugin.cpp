@@ -198,28 +198,17 @@ void PythonPlugin::OnUnload()
 		PyEval_RestoreThread(MainThreadState);
 		MainThreadState = nullptr;
 
+		// Main thread will not run queued calls anymore, so threads that wait for them get CancelledError instead of waiting forever,
+		// that includes threads that shutdown callbacks wait for.
+		CancelQueuedCalls();
+
 		CallCallbacks(CallbackType::Shutdown, py::object());
 		Callbacks.clear();
 		for (size_t i = 0; i < static_cast<size_t>(CallbackType::Count); i++)
 			CallbackCount[i] = 0;
 
-		// Threads that wait for these calls get CancelledError instead of waiting forever.
-		std::vector<QueuedCall> CallsToCancel;
-		{
-			std::lock_guard<std::mutex> Lock(QueueMutex);
-			CallsToCancel.swap(Queue);
-			bQueueHasCalls = false;
-		}
-
-		for (size_t i = 0; i < CallsToCancel.size(); i++)
-		{
-			try
-			{
-				CallsToCancel[i].Future.attr("cancel")();
-			}
-			catch (py::error_already_set&) {}
-		}
-		CallsToCancel.clear();
+		// Shutdown callbacks could release GIL, for example while joining a thread, so other threads could queue calls meanwhile.
+		CancelQueuedCalls();
 
 		Runner = py::object();
 		FlushPendingLogLines();
@@ -524,6 +513,25 @@ void PythonPlugin::RunQueuedCalls()
 
 	for (size_t i = 0; i < CallsToRun.size(); i++)
 		RunQueuedCall(CallsToRun[i]);
+}
+
+void PythonPlugin::CancelQueuedCalls()
+{
+	std::vector<QueuedCall> CallsToCancel;
+	{
+		std::lock_guard<std::mutex> Lock(QueueMutex);
+		CallsToCancel.swap(Queue);
+		bQueueHasCalls = false;
+	}
+
+	for (size_t i = 0; i < CallsToCancel.size(); i++)
+	{
+		try
+		{
+			CallsToCancel[i].Future.attr("cancel")();
+		}
+		catch (py::error_already_set&) {}
+	}
 }
 
 void PythonPlugin::WriteOutput(const std::string& Text, bool bErrorStream)

@@ -93,6 +93,7 @@ private:
 	void CallCallbacks(CallbackType Type, const py::object& Argument);
 	void RunQueuedCall(QueuedCall& Call);
 	void RunQueuedCalls();
+	void CancelQueuedCalls();
 	void FlushPendingLogLines();
 	static std::string FormatException(py::error_already_set& Error);
 };
