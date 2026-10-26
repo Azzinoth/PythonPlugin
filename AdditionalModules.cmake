@@ -2,6 +2,7 @@
 file(GLOB Editor_SRC
 	"Editor/${PROJECT_NAME}Editor.h"
 	"Editor/${PROJECT_NAME}Editor.cpp"
+	"PythonPluginEditorLink.h"
 	"SubSystems/EditorAPI/FEEditorAPI.h"
 )
 

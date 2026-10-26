@@ -9,9 +9,11 @@
 			"EntryPointFileName" : "PythonPlugin.dll",
 			"ID" : "75f947e1-b47e-464c-834e-8305a4d7e886",
 			"Name" : "PythonPlugin",
-			"SupportedGraphicsModes" : 
+			"SupportedGraphicsModes" :
 			[
-				"OnScreen"
+				"OnScreen",
+				"Offscreen",
+				"None"
 			],
 			"SupportedOS" : 
 			[

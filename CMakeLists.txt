@@ -100,6 +100,9 @@ file(GLOB Connection_To_Engine_SRC
 file(GLOB Main_SRC
 	"PythonPlugin.h"
 	"PythonPlugin.cpp"
+	"PythonBindings.h"
+	"PythonBindings.cpp"
+	"PythonPluginEditorLink.h"
 )
 
 # Public headers of plugin API, applications include them and get plugin through PLUGIN_MANAGER.GetPlugin<T>.
@@ -107,6 +110,8 @@ file(GLOB Public_SRC "Public/*.h" "Public/Editor/*.h")
 
 link_directories(${GLEW_LIB_DIR})
 link_directories(${GLFW_LIB_DIR})
+# Python.h links python313.lib with #pragma comment, so only its folder is needed.
+link_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/Python/libs)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/SubSystems/FocalEngine/SubSystems/FEBasicApplication
@@ -117,6 +122,8 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/SubSystems/FocalEngine
     ${CMAKE_CURRENT_SOURCE_DIR}/SubSystems/FocalEngine/ThirdParty
     ${CMAKE_CURRENT_SOURCE_DIR}/SubSystems/FocalEngine/ThirdParty/entt
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/Python/include
 )
 
 # Creates one plugin module DLL, every module of the plugin is set up the same way.
@@ -244,10 +251,18 @@ if(Main_SRC)
 
     # set the startup project
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
+
+    # Python runtime is copied to Build/Debug or Build/Release, plugin manager adds that folder to DLL search path when it loads plugin, and plugin uses it as Python home.
+    file(GLOB PYTHON_RUNTIME_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/Python/Runtime/*")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/Build/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PYTHON_RUNTIME_FILES} "${CMAKE_CURRENT_SOURCE_DIR}/Build/$<CONFIG>"
+    )
 endif()
 
 # Applications that generate plugin project could add more modules here, for example editor adds editor module.
 include(${CMAKE_CURRENT_SOURCE_DIR}/AdditionalModules.cmake OPTIONAL)
 
 # After all modules are added.
-fe_write_static_link_file()
+# Games link python313.lib, #pragma comment in Python.h finds it by name, so its folder is added to library paths.
+fe_write_static_link_file(LIBRARIES "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/Python/libs/python313.lib" LINK_OPTIONS "/LIBPATH:\${CMAKE_CURRENT_LIST_DIR}")
