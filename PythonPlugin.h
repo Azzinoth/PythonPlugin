@@ -6,10 +6,13 @@
 #include "SubSystems/EditorAPI/FEEditorAPI.h"
 #include "Public/PythonPluginInterface.h"
 #include "PythonPluginEditorLink.h"
+#include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 using namespace FocalEngine;
 namespace py = pybind11;
 
@@ -33,6 +36,8 @@ public:
 	void ResetNamespace() override;
 	bool AddModuleSearchPath(const std::string& DirectoryPath) override;
 	bool IsModuleAvailable(const std::string& ModuleName) override;
+	bool RegisterNativeFunction(const std::string& OwnerName, const std::string& FunctionName, NativeFunction Function) override;
+	void UnregisterNativeFunctions(const std::string& OwnerName) override;
 
 	void SetEditorAPI(FEEditorAPI* Editor) override;
 	FEEditorAPI* GetEditorAPI() const;
@@ -52,6 +57,8 @@ public:
 	py::object CallOnMainThread(py::object Function);
 	void WriteOutput(const std::string& Text, bool bErrorStream);
 	bool IsMainThread() const;
+	std::string CallNativeFunction(const std::string& FunctionName, const std::string& ArgumentsJSON);
+	std::vector<std::string> GetNativeFunctionNames() const;
 private:
 	bool bInitialized = false;
 	PyThreadState* MainThreadState = nullptr;
@@ -84,6 +91,15 @@ private:
 	std::atomic<bool> bQueueHasCalls = false;
 	// Set when plugin starts unloading, after that calls are not queued and callbacks are not added.
 	std::atomic<bool> bShuttingDown = false;
+
+	struct NativeFunctionEntry
+	{
+		std::string OwnerName;
+		NativeFunction Function;
+	};
+	// Used only on main thread. Allocated separately, so entries that owners did not unregister could be leaked on unload,
+	// destroying them could run code of modules that are already unloaded.
+	std::unique_ptr<std::unordered_map<std::string, NativeFunctionEntry>> NativeFunctions = std::make_unique<std::unordered_map<std::string, NativeFunctionEntry>>();
 
 	// Output of RunString, RunFile and Evaluate goes to result, other output goes to log.
 	std::string* CapturedOutput = nullptr;

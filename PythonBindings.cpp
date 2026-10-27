@@ -192,6 +192,10 @@ PYBIND11_MODULE(focalengine, Module)
 	}, py::arg("text"), py::arg("level") = "info", "Adds text to engine log, under PYTHON topic.");
 
 	Module.def("is_main_thread", []() { return GetPlugin().IsMainThread(); });
+	Module.def("call_native_function", [](const std::string& Name, const std::string& ArgumentsJSON) { return GetPlugin().CallNativeFunction(Name, ArgumentsJSON); },
+		py::arg("name"), py::arg("arguments_json") = "{}", MainThreadOnly(),
+		"Calls C++ function that plugin or application registered with PythonPluginInterface::RegisterNativeFunction, arguments and result are JSON text.");
+	Module.def("get_native_function_names", []() { return GetPlugin().GetNativeFunctionNames(); }, MainThreadOnly(), "Sorted names of registered native functions.");
 	Module.def("call_on_main_thread", [](py::function Function) { return GetPlugin().CallOnMainThread(Function); }, py::arg("function"),
 		"Calls function without arguments on main thread before next frame, or right away if called on main thread. Returns concurrent.futures.Future with its result.");
 

@@ -245,6 +245,18 @@ void PythonPlugin::OnUnload()
 			PyEval_SaveThread();
 	}
 
+	// Owners unregister their functions before they are unloaded, functions that are left could belong to modules that are already unloaded.
+	if (!NativeFunctions->empty())
+	{
+		std::string FunctionNames;
+		for (const auto& Entry : *NativeFunctions)
+			FunctionNames += (FunctionNames.empty() ? "\"" : ", \"") + Entry.first + "\" of \"" + Entry.second.OwnerName + "\"";
+
+		LOG.Add("PythonPlugin::OnUnload: Native functions " + FunctionNames + " were not unregistered, they are leaked, because destroying them could run code of unloaded modules", "PYTHON_PLUGIN", FE_LOG_WARNING);
+		static_cast<void>(NativeFunctions.release());
+		NativeFunctions = std::make_unique<std::unordered_map<std::string, NativeFunctionEntry>>();
+	}
+
 	EditorAPI = nullptr;
 }
 
@@ -408,6 +420,87 @@ bool PythonPlugin::IsModuleAvailable(const std::string& ModuleName)
 	{
 		return false;
 	}
+}
+
+bool PythonPlugin::RegisterNativeFunction(const std::string& OwnerName, const std::string& FunctionName, NativeFunction Function)
+{
+	if (!IsMainThread())
+	{
+		LOG.Add("PythonPlugin::RegisterNativeFunction: \"" + FunctionName + "\" of \"" + OwnerName + "\" is not registered, because it should be registered on main thread", "PYTHON_PLUGIN", FE_LOG_ERROR);
+		return false;
+	}
+
+	if (FunctionName.empty() || !Function)
+	{
+		LOG.Add("PythonPlugin::RegisterNativeFunction: Function of \"" + OwnerName + "\" is not registered, because its name or function is empty", "PYTHON_PLUGIN", FE_LOG_ERROR);
+		return false;
+	}
+
+	const auto ExistingEntry = NativeFunctions->find(FunctionName);
+	if (ExistingEntry != NativeFunctions->end())
+	{
+		LOG.Add("PythonPlugin::RegisterNativeFunction: \"" + FunctionName + "\" of \"" + OwnerName + "\" is not registered, because \"" + ExistingEntry->second.OwnerName + "\" already registered function with that name", "PYTHON_PLUGIN", FE_LOG_WARNING);
+		return false;
+	}
+
+	(*NativeFunctions)[FunctionName] = NativeFunctionEntry{ OwnerName, std::move(Function) };
+	return true;
+}
+
+void PythonPlugin::UnregisterNativeFunctions(const std::string& OwnerName)
+{
+	if (!IsMainThread())
+	{
+		LOG.Add("PythonPlugin::UnregisterNativeFunctions: Functions of \"" + OwnerName + "\" are not unregistered, because they should be unregistered on main thread", "PYTHON_PLUGIN", FE_LOG_ERROR);
+		return;
+	}
+
+	auto Iterator = NativeFunctions->begin();
+	while (Iterator != NativeFunctions->end())
+	{
+		if (Iterator->second.OwnerName == OwnerName)
+		{
+			Iterator = NativeFunctions->erase(Iterator);
+		}
+		else
+		{
+			Iterator++;
+		}
+	}
+}
+
+std::string PythonPlugin::CallNativeFunction(const std::string& FunctionName, const std::string& ArgumentsJSON)
+{
+	const auto Entry = NativeFunctions->find(FunctionName);
+	if (Entry == NativeFunctions->end())
+		throw py::key_error("Native function \"" + FunctionName + "\" is not registered, focalengine.get_native_function_names() lists registered functions");
+
+	// Copy keeps function alive even if it unregisters itself while it runs.
+	const NativeFunction Function = Entry->second.Function;
+	try
+	{
+		// Other Python threads could run while C++ function works.
+		py::gil_scoped_release Release;
+		return Function(ArgumentsJSON);
+	}
+	catch (const std::exception& Exception)
+	{
+		throw std::runtime_error("Native function \"" + FunctionName + "\" failed: " + Exception.what());
+	}
+	catch (...)
+	{
+		throw std::runtime_error("Native function \"" + FunctionName + "\" failed with unknown exception");
+	}
+}
+
+std::vector<std::string> PythonPlugin::GetNativeFunctionNames() const
+{
+	std::vector<std::string> Result;
+	for (const auto& Entry : *NativeFunctions)
+		Result.push_back(Entry.first);
+
+	std::sort(Result.begin(), Result.end());
+	return Result;
 }
 
 void PythonPlugin::SetEditorAPI(FEEditorAPI* Editor)
