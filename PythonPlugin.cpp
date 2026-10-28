@@ -102,14 +102,15 @@ def is_module_available(name):
 	}
 }
 
-void PythonPlugin::OnLoad()
+bool PythonPlugin::OnLoad()
 {
 	MainThreadID = std::this_thread::get_id();
 
 	if (Py_IsInitialized())
 	{
+		// Plugin stays loaded, its functions fail while Python is not initialized by plugin.
 		LOG.Add("PythonPlugin::OnLoad: Python is already initialized by application, plugin could not use its own runtime", "PYTHON_PLUGIN", FE_LOG_ERROR);
-		return;
+		return true;
 	}
 
 	// Inittab stays after Python is finalized, so after plugin is reloaded existing entry gets function from new DLL.
@@ -126,14 +127,14 @@ void PythonPlugin::OnLoad()
 	if (!bModuleRegistered && PyImport_AppendInittab("focalengine", PyInit_focalengine) == -1)
 	{
 		LOG.Add("PythonPlugin::OnLoad: Failed to register focalengine module", "PYTHON_PLUGIN", FE_LOG_ERROR);
-		return;
+		return true;
 	}
 
 	const std::wstring RuntimeDirectory = GetPythonRuntimeDirectory();
 	if (RuntimeDirectory.empty())
 	{
 		LOG.Add("PythonPlugin::OnLoad: Folder of Python runtime is not found", "PYTHON_PLUGIN", FE_LOG_ERROR);
-		return;
+		return true;
 	}
 
 	// Isolated config ignores Python that is installed on computer and its environment variables.
@@ -158,7 +159,7 @@ void PythonPlugin::OnLoad()
 	if (PyStatus_Exception(Status))
 	{
 		LOG.Add("PythonPlugin::OnLoad: Python failed to start from \"" + ToUTF8(RuntimeDirectory) + "\": " + std::string(Status.err_msg != nullptr ? Status.err_msg : "unknown error"), "PYTHON_PLUGIN", FE_LOG_ERROR);
-		return;
+		return true;
 	}
 
 	try
@@ -179,7 +180,7 @@ void PythonPlugin::OnLoad()
 		LOG.Add("PythonPlugin::OnLoad: Python started, but plugin setup failed: " + FormatException(Error), "PYTHON_PLUGIN", FE_LOG_ERROR);
 		Runner = py::object();
 		Py_FinalizeEx();
-		return;
+		return true;
 	}
 
 	PythonVersion = Py_GetVersion();
@@ -191,6 +192,7 @@ void PythonPlugin::OnLoad()
 	Instance = this;
 
 	LOG.Add("PythonPlugin::OnLoad: Python " + PythonVersion + " started from \"" + ToUTF8(RuntimeDirectory) + "\"", "PYTHON_PLUGIN");
+	return true;
 }
 
 void PythonPlugin::OnUnload()

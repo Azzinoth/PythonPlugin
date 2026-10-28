@@ -22,7 +22,7 @@ public:
 	// Bindings reach plugin through it, it is set while Python is running.
 	static PythonPlugin* Instance;
 
-	void OnLoad() override;
+	bool OnLoad() override;
 	void OnUnload() override;
 	void OnUpdate(double DeltaTime) override;
 	void OnSceneAdded(FEScene* Scene) override;
